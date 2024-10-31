@@ -1,234 +1,242 @@
-from socket import *
+# p1.py
+import socket
 import threading
 import tkinter as tk
-from tkinter import messagebox, filedialog, Label, Toplevel, Button
+from tkinter import filedialog, messagebox
+from tkinter import ttk
 import os
+import datetime
 
-serverPort1 = 12001 
-serverSocket1 = socket(AF_INET, SOCK_DGRAM)
-serverSocket1.bind(("127.0.0.1", serverPort1))
+UDP_IP = "127.0.0.1"
+UDP_PORT_SEND = 12000
+UDP_PORT_RECEIVE = 12001
+TCP_HOST = "localhost"
+TCP_PORT = 5500
+MAX_RETRIES = 5
+ACK_TIMEOUT = 2  # seconds
 
+def send_udp_message(message):
+    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    msg = message.encode()
+    retries = 0
+    while retries < MAX_RETRIES:
+        udp_socket.sendto(msg, (UDP_IP, UDP_PORT_SEND))
+        try:
+            udp_socket.settimeout(ACK_TIMEOUT)
+            ack, _ = udp_socket.recvfrom(1024)
+            if ack.decode() == "ACK":
+                return True
+        except socket.timeout:
+            retries += 1
+    return False
 
-def packeting(s):
-    L = []
-    sprime = s.split()
-    seqnum = 0
-    for k in sprime:
-        L.append((k, seqnum))
-        seqnum += 1
-
-    return L
-
-
-seqnum_received = 0  
-
-
-def listen():
-    print("Welcome to p2p-chat")
-    print("Listening: ... ")
-    L = []
-    seqnumwanted = 0  
+def udp_listener():
+    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_socket.bind((UDP_IP, UDP_PORT_RECEIVE))
     while True:
         try:
-            messagerec, clientAddress = serverSocket1.recvfrom(2048)
-            msg = messagerec.decode()
-            message = eval(msg)  
-            global seqnum_received
-            if type(message) == tuple:  
-                seqnum_received = message[1]  
-                if seqnum_received == seqnumwanted:  
-                    
-                    serverSocket1.sendto(str(seqnum_received + 1).encode(), ("127.0.0.1", 12000))
-                    L.append(message[0])
-
-                    seqnumwanted += 1  
-                else:
-                    
-                    serverSocket1.sendto(str(seqnumwanted).encode(), ("127.0.0.1", 12000))  
-            elif type(message) == bool and message == True:
-                chatbox.insert(tk.END, "\n||Peer: " + " ".join(L))  
-                L = []
-                seqnumwanted = 0
-                seqnum_received = 0
-            elif type(message) == int:
-                seqnum_received = message
-
+            data, addr = udp_socket.recvfrom(1024)
+            message = data.decode()
+            timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+            chatbox.config(state='normal')
+            chatbox.insert(tk.END, f"\n[{timestamp}] Peer: {message}", 'peer')
+            chatbox.config(state='disabled')
+            chatbox.see(tk.END)
+            udp_socket.sendto("ACK".encode(), addr)
         except Exception as e:
-            print(e)
+            print(f"UDP Listener Error: {e}")
 
-
-def send():
+def send(event=None):
     rawmsg = message_entry.get()
-    if os.path.exists(rawmsg):    
-        send_file(client_socket , rawmsg)
-    else:   
-        packets = packeting(rawmsg)  
-        for packet in packets:
-            while True:
-                x = str(packet)  
-                serverSocket1.sendto(x.encode(), ("127.0.0.1", 12000))
-                try:
-                    if seqnum_received == packet[1] + 1:
-                        break
-                except Exception as e:
-                    print(e)
-        serverSocket1.sendto(str(True).encode(), ("127.0.0.1", 12000))  
-        chatbox.insert(tk.END , "\n|You: " + rawmsg)
-        message_entry.delete(0, tk.END)
+    if rawmsg.strip() == '':
+        return
+    if os.path.isfile(rawmsg):
+        send_file(rawmsg)
+    else:
+        success = send_udp_message(rawmsg)
+        if success:
+            timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+            chatbox.config(state='normal')
+            chatbox.insert(tk.END, f"\n[{timestamp}] You: {rawmsg}", 'you')
+            chatbox.config(state='disabled')
+            chatbox.see(tk.END)
+            message_entry.delete(0, tk.END)
+        else:
+            chatbox.config(state='normal')
+            chatbox.insert(tk.END, "\n|Error: Message not sent after retries.", 'error')
+            chatbox.config(state='disabled')
+            chatbox.see(tk.END)
 
-
-def send_file(path):
-    file_path = path
-    file = open(file_path, "rb")
-
-    name = os.path.basename(file_path)
-
-    client_socket.send(name.encode())
-
-    data = file.read()
-    client_socket.sendall(data)
-    client_socket.send(b"<DONE>")
-    file.close()
-
+def send_file(file_path):
+    try:
+        with open(file_path, "rb") as file:
+            name = os.path.basename(file_path)
+            client_socket.send(name.encode())
+            data = file.read()
+            client_socket.sendall(data)
+            client_socket.send(b"<DONE>")
+            timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+            chatbox.config(state='normal')
+            chatbox.insert(tk.END, f"\n[{timestamp}] You sent file: {name}", 'you')
+            chatbox.config(state='disabled')
+            chatbox.see(tk.END)
+    except Exception as e:
+        print(f"File Send Error: {e}")
 
 def receive_file():
     save_path = os.getcwd()
     while True:
-        file_name = client_socket.recv(1024).decode()
-        file_name = "new" + file_name
-        chatbox.insert(tk.END, "\nReceived: " + file_name)
-        file_name = os.path.join(save_path, file_name)
-        file = open(file_name, "wb")
-        data = b""
-        ongoing = True
-        while ongoing:
-            info = client_socket.recv(1024)
-            if info[-6:] == b"<DONE>":
-                info = info[0:-6]
-                ongoing = False
-            data += info
-        file.write(data)
-        file.close()
+        try:
+            file_name = client_socket.recv(1024).decode()
+            if not file_name:
+                break  # Connection closed
+            file_name = "new_" + file_name
+            timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+            chatbox.config(state='normal')
+            chatbox.insert(tk.END, f"\n[{timestamp}] Received file: {file_name}", 'peer')
+            chatbox.config(state='disabled')
+            chatbox.see(tk.END)
+            file_path = os.path.join(save_path, file_name)
+            with open(file_path, "wb") as file:
+                while True:
+                    data = client_socket.recv(4096)
+                    if data.endswith(b"<DONE>"):
+                        file.write(data[:-6])
+                        break
+                    if not data:
+                        break
+                    file.write(data)
+        except Exception as e:
+            print(f"File Receive Error: {e}")
+            break  # Exit the loop if there's an error
 
 def toggle_theme():
-    global frame 
-    current_theme = root.tk.call("ttk::style", "theme", "use")
-    if current_theme == "clam":
-        new_theme = "vista"
-        root.configure(bg="#ADD8E6")
-        frame.configure(bg="#ADD8E6")
+    global current_theme
+    if current_theme == "light":
+        root.style.theme_use('dark')
+        current_theme = "dark"
     else:
-        new_theme = "clam"
-        root.configure(bg="#333A56")
-        frame.configure(bg="#333A56")
-    root.tk.call("ttk::style", "theme", "use", new_theme)
+        root.style.theme_use('light')
+        current_theme = "light"
+
+def browse_file():
+    file_path = filedialog.askopenfilename()
+    if file_path:
+        send_file(file_path)
+
+def open_emoji_panel():
+    emoji_panel = tk.Toplevel(root)
+    emoji_panel.title("Emoji Panel")
+    emojis = ["😊", "😂", "😍", "😉", "😎", "😁", "😢", "😭", "😡", "👍", "🙏", "🔥", "❤️", "🥰", "😴"]
+    for emoji in emojis:
+        btn = ttk.Button(emoji_panel, text=emoji, command=lambda e=emoji: insert_emoji(e))
+        btn.pack(side=tk.LEFT, padx=3, pady=3)
+
+def insert_emoji(emoji):
+    message_entry.insert(tk.END, emoji)
+    message_entry.focus_set()
+
+def clear_chat():
+    chatbox.config(state='normal')
+    chatbox.delete(1.0, tk.END)
+    chatbox.config(state='disabled')
+
+def about():
+    messagebox.showinfo("About", "p2p-chat Application\nVersion 2.0\nEnhanced with emojis and better UI!")
 
 def main():
-    host = "localhost"
-    port = 5500
-    global root
-    global chatbox
-    global message_entry
-    global frame  
-    global client_socket
-    server_socket = socket(AF_INET, SOCK_STREAM)
-    
+    global root, chatbox, message_entry, client_socket, current_theme
+    current_theme = "light"
+    connected = False
+
+    # Only one side should bind and listen, the other should connect
     try:
-        server_socket.bind((host, port))
-        server_socket.listen()
-        print("Connecting...")
-        
-        client_socket, client_address = server_socket.accept()
-        print("Connected.", client_address)
-    except OSError:
-        print("Connecting...")
-        
-        client_socket = socket(AF_INET, SOCK_STREAM)
-        client_socket.connect((host, port))
-        print("Connected.")
-        
-    def browse_file():
-        file_path = tk.filedialog.askopenfilename()
-        if file_path:
-            send_file(file_path)
-    
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((TCP_HOST, TCP_PORT))
+        connected = True
+        print("Connected as client.")
+    except Exception as e:
+        print("Trying to start as server...")
+        try:
+            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_socket.bind((TCP_HOST, TCP_PORT))
+            server_socket.listen(1)
+            print("Waiting for connection...")
+            client_socket, _ = server_socket.accept()
+            connected = True
+            print("Connected as server.")
+        except Exception as e:
+            print(f"Connection Error: {e}")
+
+    if not connected:
+        print("Unable to establish TCP connection.")
+        return
+
     root = tk.Tk()
     root.title("p2p-chat")
+    root.geometry("600x500")
 
-    root.tk_setPalette(background="#ADD8E6") 
-    root.configure(bg="#ADD8E6") 
-    
-    frame = tk.Frame(root, relief=tk.RIDGE, borderwidth=5)
-    frame.pack(padx=10, pady=10)
+    root.style = ttk.Style()
+    root.style.theme_create('light', settings={
+        '.': {'configure': {'background': '#ffffff', 'foreground': '#000000'}},
+        'TLabel': {'configure': {'background': '#ffffff', 'foreground': '#000000'}},
+        'TButton': {'configure': {'background': '#e0e0e0'}},
+        'TEntry': {'configure': {'fieldbackground': '#ffffff', 'foreground': '#000000'}},
+        'TText': {'configure': {'background': '#ffffff', 'foreground': '#000000'}}
+    })
+    root.style.theme_create('dark', settings={
+        '.': {'configure': {'background': '#2b2b2b', 'foreground': '#ffffff'}},
+        'TLabel': {'configure': {'background': '#2b2b2b', 'foreground': '#ffffff'}},
+        'TButton': {'configure': {'background': '#3c3f41', 'foreground': '#ffffff'}},
+        'TEntry': {'configure': {'fieldbackground': '#3c3f41', 'foreground': '#ffffff'}},
+        'TText': {'configure': {'background': '#2b2b2b', 'foreground': '#ffffff'}}
+    })
+    root.style.theme_use('light')
 
-    message_entry = tk.Entry(frame, width=50, font=("Helvetica", 12), fg="grey")
-    message_entry.grid(row=0, column=1, padx=5, pady=5)
+    frame = ttk.Frame(root)
+    frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
-    message_entry.insert(0, "Type here...")
-    message_entry.bind("<FocusIn>", lambda event: focus(event, message_entry))
-    message_entry.bind("<FocusOut>", lambda event: focusout(event, message_entry))
-    
-    message_label = tk.Label(frame, text="Your Message:", font=("Georgia", 12))
-    message_label.grid(row=0, column=0, sticky="w")
+    message_label = ttk.Label(frame, text="Your Message:")
+    message_label.pack(anchor='w')
 
-    send_button = tk.Button(frame, text="Send \u2708", command=send, font=("Helvetica", 12, "bold"))
-    send_button.grid(row=0, column=2, padx=5, pady=5)
+    message_entry = ttk.Entry(frame)
+    message_entry.pack(fill=tk.X, pady=5)
+    message_entry.bind('<Return>', send)  # Bind 'Enter' key to send
 
-    file_button = tk.Button(frame, text="Send File 📁", command=browse_file, font=("Georgia", 12))
-    file_button.grid(row=1, column=1, padx=5, pady=5)
+    send_button = ttk.Button(frame, text="Send ✈", command=send)
+    send_button.pack(pady=5)
 
-    chatbox = tk.Text(frame, height=10, width=60, font=("Helvetica", 12))
-    chatbox.grid(row=2, columnspan=3, padx=5, pady=5)
-    
-    button_frame = tk.Frame(root)
-    button_frame.pack(pady=10)
+    chatbox = tk.Text(frame, height=15, wrap='word')
+    chatbox.pack(fill=tk.BOTH, expand=True, pady=5)
+    chatbox.tag_config('peer', foreground='blue')
+    chatbox.tag_config('you', foreground='green')
+    chatbox.tag_config('error', foreground='red')
+    chatbox.config(state='disabled')  # Make chatbox read-only
 
-    net_label = tk.Label(button_frame, text="🌐p2p-chat", font=("Georgia", 18), fg="blue")
-    net_label.pack(side=tk.LEFT, padx=10)
+    button_frame = ttk.Frame(root)
+    button_frame.pack(fill=tk.X, padx=10, pady=5)
 
-    clear_button = tk.Button(button_frame, text="Clear \U0001F5D1", command=clear_chat, font=("Georgia", 12))
-    clear_button.pack(side=tk.LEFT, padx=10)
+    file_button = ttk.Button(button_frame, text="Send File 📁", command=browse_file)
+    file_button.pack(side=tk.LEFT, padx=5)
 
-    theme_button = tk.Button(button_frame, text="✩/☾", command=toggle_theme, font=("Georgia", 12, "bold"))
-    theme_button.pack(side=tk.LEFT, padx=10)
-    
-    emoji_panel_button = tk.Button(button_frame, text="😎", command=open_emoji_panel, font=("Georgia", 12))
-    emoji_panel_button.pack(side=tk.LEFT, padx=10)
+    emoji_button = ttk.Button(button_frame, text="Emojis 😊", command=open_emoji_panel)
+    emoji_button.pack(side=tk.LEFT, padx=5)
 
-    receiving = threading.Thread(target=listen)
-    receiving.start()
-    recfile = threading.Thread(target=receive_file)
-    recfile.start()
+    clear_button = ttk.Button(button_frame, text="Clear Chat 🗑", command=clear_chat)
+    clear_button.pack(side=tk.LEFT, padx=5)
+
+    theme_button = ttk.Button(button_frame, text="Toggle Theme ✨", command=toggle_theme)
+    theme_button.pack(side=tk.LEFT, padx=5)
+
+    about_button = ttk.Button(button_frame, text="About ℹ", command=about)
+    about_button.pack(side=tk.RIGHT, padx=5)
+
+    threading.Thread(target=udp_listener, daemon=True).start()
+    threading.Thread(target=receive_file, daemon=True).start()
 
     root.mainloop()
 
-def open_emoji_panel():
-    if message_entry.get() == "Type here...":
-        message_entry.delete(0, tk.END)
-
-    emoji_panel = Toplevel(root)
-    emoji_panel.title("Emoji Panel")
-
-    emojis = ["😊", "😎", "😍", "🤩", "😂", "😜", "😇", "🥳", "🎉"]
-    for emoji in emojis:
-        emoji_button = Button(emoji_panel, text=emoji, font=("Segoe UI Emoji", 12), command=lambda e=emoji: send_emoji(e))
-        emoji_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-def send_emoji(emoji):
-    if message_entry.get() == "Type here...":
-        message_entry.delete(0, tk.END)
-    message_entry.insert(tk.END, emoji)
-
-def focus(event, entry):
-    if entry.get() == "Type here...":
-        entry.delete(0, "end")
-
-def focusout(event, entry):
-    if not entry.get():
-        entry.insert(0, "Type here...")
-        
-def clear_chat():
-    chatbox.delete(1.0, tk.END) 
+    client_socket.close()  # Close the socket when GUI is closed
 
 if __name__ == "__main__":
     main()

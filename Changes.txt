@@ -1,0 +1,19 @@
+Changes since the original upload:
+
+UI Enhancements:
+
+Expanded the emoji panel for inserting emojis into messages.
+Created a different light and dark themes with a toggle button for theme switching.
+Improved fonts and colors for better readability.
+Socket and Connection Handling:
+
+Resolved infinite "File Receive Error" by breaking out of the receive_file loop on errors.
+Ensured socket cleanup with client_socket.close() on exit.
+Added auto-retry for TCP connections, allowing one side to bind/listen and the other to connect.
+Messaging and File Transfer:
+
+Simplified message sending logic, using UDP with retries and acknowledgments.
+Improved file transfer with TCP, managing file data in binary mode.
+Added timestamps to messages and file notifications in the chatbox.
+Enter Key Binding:
+Enabled the 'Enter' key for sending messages, alongside the "Send" button.

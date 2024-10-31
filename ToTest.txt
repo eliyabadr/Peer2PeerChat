@@ -1,0 +1,26 @@
+Testing p2p-chat with Network Conditions using Clumsy.exe
+
+Clumsy is a tool that simulates unreliable network conditions like latency, packet loss, and duplication. It's helpful to test how the p2p-chat application handles network issues.
+
+-- Steps
+
+1. Download Clumsy:
+   - Go to the Clumsy GitHub repository: https://github.com/jagt/clumsy/releases
+   - Download and extract `clumsy.exe`.
+
+2. Setup Clumsy:
+   - Open `clumsy.exe`.
+   - Choose options such as:
+     - Lag: Introduces delay in packets.
+     - Drop: Randomly drops packets.
+     - Throttle: Limits bandwidth.
+   - Click Start to begin applying network effects.
+
+3. Test p2p-chat:
+   - With Clumsy running, test p2p-chat for:
+     - Message delivery reliability (messages should be retried if dropped).
+     - File transfer behavior under lag and drop conditions.
+   - Observe how themes, emoji insertion, and retry mechanisms respond.
+
+4. Stop Clumsy:
+   - Return to Clumsy and click Stop to restore normal network conditions.
